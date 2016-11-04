@@ -3,8 +3,10 @@ package gojit
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,11 +42,12 @@ type D map[string]interface{}
 
 // RequestConfig provide user input request structure
 type RequestConfig struct {
-	Method  string
-	Path    string
-	Body    string
-	Headers H
-	Debug   bool
+	Method        string
+	Path          string
+	Body          string
+	Headers       H
+	Debug         bool
+	MultipartBody io.Reader
 }
 
 // TestRequest is testing url string if server is running
@@ -158,6 +161,24 @@ func (rc *RequestConfig) SetFORM(body H) *RequestConfig {
 	return rc
 }
 
+// SetFORM supply form body.
+func (rc *RequestConfig) SetMultipartFORM(body H) *RequestConfig {
+
+	buf := &bytes.Buffer{}
+	writer := multipart.NewWriter(buf)
+
+	for k, v := range body {
+		writer.WriteField(k, v)
+	}
+
+	writer.Close()
+
+	rc.Headers[ContentType] = writer.FormDataContentType()
+	rc.MultipartBody = buf
+
+	return rc
+}
+
 // SetBody supply raw body.
 func (rc *RequestConfig) SetBody(body string) *RequestConfig {
 	if len(body) > 0 {
@@ -187,17 +208,23 @@ func (rc *RequestConfig) initTest() (*http.Request, *httptest.ResponseRecorder) 
 	req.Header.Set(UserAgent, "Gofight-client/"+Version)
 
 	if rc.Method == "POST" || rc.Method == "PUT" {
+
 		if strings.HasPrefix(rc.Body, "{") {
 			req.Header.Set(ContentType, ApplicationJSON)
 		} else {
 			req.Header.Set(ContentType, ApplicationForm)
 		}
+
 	}
 
 	if len(rc.Headers) > 0 {
 		for k, v := range rc.Headers {
 			req.Header.Set(k, v)
 		}
+	}
+
+	if rc.MultipartBody != nil && strings.HasPrefix(req.Header.Get(ContentType), "multipart/form-data") {
+		req.Body = ioutil.NopCloser(rc.MultipartBody)
 	}
 
 	if rc.Debug {
